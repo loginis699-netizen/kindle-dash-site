@@ -54,6 +54,7 @@ def fetch_weather():
         "https://api.open-meteo.com/v1/forecast"
         f"?latitude={LAT}&longitude={LON}"
         "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m"
+        "&hourly=temperature_2m,precipitation_probability"
         "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset"
         "&timezone=Europe%2FVilnius&forecast_days=4"
     )
@@ -65,6 +66,7 @@ def demo_weather():
     return {
         "current": {"temperature_2m": 2.4, "apparent_temperature": -0.8,
                     "weather_code": 3, "wind_speed_10m": 14.0},
+        "hourly": demo_hourly(),
         "daily": {
             "time": ["2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26"],
             "weather_code": [3, 61, 71, 0],
@@ -74,6 +76,17 @@ def demo_weather():
             "sunset": ["2026-11-23T15:52"] * 4,
         },
     }
+
+
+def demo_hourly():
+    from datetime import timedelta
+    t0 = datetime(2026, 11, 23, 0, 0)
+    temps = [2.4, 2.0, 1.8, 1.5, 1.4, 1.6, 2.2, 3.0, 3.8, 4.1, 4.3, 4.0, 3.5, 3.0,
+             2.6, 2.4, 2.2, 2.0, 1.9, 1.8, 1.7, 1.6, 1.5, 1.4]
+    prob = [5, 5, 10, 10, 15, 20, 35, 55, 70, 60, 45, 30, 20, 15, 10, 5, 5, 5, 0, 0, 0, 0, 0, 0]
+    times = [(t0 + timedelta(hours=i)).strftime("%Y-%m-%dT%H:00") for i in range(48)]
+    return {"time": times, "temperature_2m": (temps * 2)[:48],
+            "precipitation_probability": (prob * 2)[:48]}
 
 
 def icon(d, kind, cx, cy, s):
@@ -118,32 +131,93 @@ def center(d, text, y, font, fill=0, x0=0, x1=W):
     d.text((x0 + (x1 - x0 - w) / 2, y), text, font=font, fill=fill)
 
 
+def hourly_slice(data, now, n=12):
+    h = data["hourly"]
+    start = now.replace(minute=0, second=0, microsecond=0, tzinfo=None)
+    times = [datetime.fromisoformat(t) for t in h["time"]]
+    idx = next((i for i, t in enumerate(times) if t >= start), 0)
+    out = []
+    for i in range(idx, min(idx + n, len(times))):
+        pp = h["precipitation_probability"][i]
+        out.append((times[i], h["temperature_2m"][i], pp if pp is not None else 0))
+    return out
+
+
+def draw_hourly(d, f, rows, y0):
+    """Temperature line + precipitation-probability bars for the next hours."""
+    x_l, x_r = 55, W - 55
+    n = len(rows)
+    step = (x_r - x_l) / max(n - 1, 1)
+    xs = [x_l + i * step for i in range(n)]
+    temps = [r[1] for r in rows]
+    tmin, tmax = min(temps), max(temps)
+    span = max(tmax - tmin, 2.0)
+    ty0, ty1 = y0 + 54, y0 + 106         # temperature band (top..bottom)
+    ys = [ty1 - (t - tmin) / span * (ty1 - ty0) for t in temps]
+
+    center(d, "Kitos valandos: linija \u2013 temperatūra, stulpeliai \u2013 lietaus tikimybė", y0, f(15))
+
+    # precipitation bars (base line at y0+160)
+    base, maxh = y0 + 160, 38
+    bw = 22
+    for x, (_, _, pp) in zip(xs, rows):
+        h = int(pp / 100 * maxh)
+        d.rectangle([x - bw // 2, base - maxh, x + bw // 2, base], outline=200)
+        if h > 0:
+            d.rectangle([x - bw // 2, base - h, x + bw // 2, base], fill=70)
+    d.line([x_l - 14, base, x_r + 14, base], fill=0, width=2)
+
+    # temperature line
+    d.line(list(zip(xs, ys)), fill=0, width=3)
+    for x, y in zip(xs, ys):
+        d.ellipse([x - 4, y - 4, x + 4, y + 4], fill=0)
+    for i, (x, y, t) in enumerate(zip(xs, ys, temps)):
+        if i % 2 == 0:
+            txt = f"{t:+.0f}\u00b0"
+            w = d.textlength(txt, font=f(17, True))
+            d.text((x - w / 2, y - 27), txt, font=f(17, True), fill=0)
+
+    # hour labels + % under bars
+    for i, (x, (t, _, pp)) in enumerate(zip(xs, rows)):
+        lab = f"{t.hour:02d}"
+        w = d.textlength(lab, font=f(16, True))
+        d.text((x - w / 2, base + 4), lab, font=f(16, True), fill=0)
+        if i % 2 == 0 and pp >= 10:
+            pt = f"{pp}%"
+            w = d.textlength(pt, font=f(13))
+            d.text((x - w / 2, base + 24), pt, font=f(13), fill=0)
+
+
 def render(data, now, clock=True):
     img = Image.new("L", (W, H), 255)
     d = ImageDraw.Draw(img)
     f = lambda sz, b=False: ImageFont.truetype(FONT_B if b else FONT, sz)
 
-    # Header: time and date
+    # Header: date (no big clock when hosted statically)
     if clock:
-        center(d, now.strftime("%H:%M"), 14, f(130, True))
-        center(d, WEEKDAYS[now.weekday()], 160, f(36, True))
-        center(d, f"{now.year} m. {MONTHS[now.month - 1]} {now.day} d.", 205, f(28))
+        center(d, now.strftime("%H:%M"), 0, f(100, True))
+        center(d, WEEKDAYS[now.weekday()], 112, f(30, True))
+        center(d, f"{now.year} m. {MONTHS[now.month - 1]} {now.day} d.", 148, f(22))
     else:
-        # Static hosting: image is re-rendered only every ~15 min, so no big clock.
-        center(d, str(now.day), 0, f(150, True))
-        center(d, WEEKDAYS[now.weekday()], 160, f(36, True))
-        center(d, f"{now.year} m. {MONTHS[now.month - 1]}", 205, f(28))
-        center(d, f"atnaujinta {now.strftime('%H:%M')}", 236, f(16))
-    d.line([40, 255, W - 40, 255], fill=0, width=3)
+        center(d, str(now.day), -6, f(110, True))
+        center(d, WEEKDAYS[now.weekday()], 112, f(30, True))
+        center(d, f"{now.year} m. {MONTHS[now.month - 1]}", 148, f(22))
+        center(d, f"atnaujinta {now.strftime('%H:%M')}", 178, f(14))
+    d.line([40, 202, W - 40, 202], fill=0, width=3)
 
     # Current weather
     cur = data["current"]
     text, kind = wmo(cur["weather_code"])
-    icon(d, kind, 130, 345, 120)
-    d.text((230, 285), f"{cur['temperature_2m']:+.0f}°", font=f(96, True), fill=0)
-    d.text((232, 395), text, font=f(30), fill=0)
-    d.text((232, 435), f"Jaučiasi kaip {cur['apparent_temperature']:+.0f}°  ·  vėjas {cur['wind_speed_10m']:.0f} km/h", font=f(18), fill=0)
-    d.line([40, 485, W - 40, 485], fill=0, width=3)
+    icon(d, kind, 115, 275, 100)
+    d.text((215, 215), f"{cur['temperature_2m']:+.0f}\u00b0", font=f(80, True), fill=0)
+    d.text((217, 308), text, font=f(26), fill=0)
+    d.text((217, 344), f"Jaučiasi kaip {cur['apparent_temperature']:+.0f}\u00b0  \u00b7  vėjas {cur['wind_speed_10m']:.0f} km/h",
+           font=f(16), fill=0)
+    d.line([40, 380, W - 40, 380], fill=0, width=3)
+
+    # Hourly forecast
+    draw_hourly(d, f, hourly_slice(data, now), 392)
+    d.line([40, 590, W - 40, 590], fill=0, width=3)
 
     # 3-day forecast
     day = data["daily"]
@@ -153,15 +227,16 @@ def render(data, now, clock=True):
         x1 = x0 + colw
         dt = datetime.fromisoformat(day["time"][i])
         t, k = wmo(day["weather_code"][i])
-        center(d, WEEKDAYS_SHORT[dt.weekday()] + f" {dt.day}", 505, f(26, True), x0=x0, x1=x1)
-        icon(d, k, (x0 + x1) // 2, 600, 80)
-        center(d, f"{day['temperature_2m_max'][i]:+.0f}° / {day['temperature_2m_min'][i]:+.0f}°", 665, f(24, True), x0=x0, x1=x1)
-        center(d, t, 700, f(18), x0=x0, x1=x1)
+        center(d, WEEKDAYS_SHORT[dt.weekday()] + f" {dt.day}", 598, f(22, True), x0=x0, x1=x1)
+        icon(d, k, (x0 + x1) // 2, 650, 62)
+        center(d, f"{day['temperature_2m_max'][i]:+.0f}\u00b0 / {day['temperature_2m_min'][i]:+.0f}\u00b0",
+               690, f(20, True), x0=x0, x1=x1)
+        center(d, t, 718, f(15), x0=x0, x1=x1)
 
-    d.line([40, 740, W - 40, 740], fill=0, width=3)
+    d.line([40, 745, W - 40, 745], fill=0, width=3)
     sr = day["sunrise"][0][11:16]
     ss = day["sunset"][0][11:16]
-    center(d, f"Saulėtekis {sr}   ·   Saulėlydis {ss}", 755, f(20))
+    center(d, f"Saulėtekis {sr}   \u00b7   Saulėlydis {ss}", 761, f(17))
     return img
 
 
