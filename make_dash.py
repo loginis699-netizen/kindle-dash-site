@@ -152,13 +152,13 @@ def draw_hourly(d, f, rows, y0):
     temps = [r[1] for r in rows]
     tmin, tmax = min(temps), max(temps)
     span = max(tmax - tmin, 2.0)
-    ty0, ty1 = y0 + 54, y0 + 106         # temperature band (top..bottom)
+    ty0, ty1 = y0 + 50, y0 + 98         # temperature band (top..bottom)
     ys = [ty1 - (t - tmin) / span * (ty1 - ty0) for t in temps]
 
     center(d, "Kitos valandos: linija \u2013 temperatūra, stulpeliai \u2013 lietaus tikimybė", y0, f(15))
 
-    # precipitation bars (base line at y0+160)
-    base, maxh = y0 + 160, 38
+    # precipitation bars (base line at y0+140)
+    base, maxh = y0 + 140, 36
     bw = 22
     for x, (_, _, pp) in zip(xs, rows):
         h = int(pp / 100 * maxh)
@@ -185,7 +185,7 @@ def draw_hourly(d, f, rows, y0):
         if i % 2 == 0 and pp >= 10:
             pt = f"{pp}%"
             w = d.textlength(pt, font=f(13))
-            d.text((x - w / 2, base + 24), pt, font=f(13), fill=0)
+            d.text((x - w / 2, base + 22), pt, font=f(13), fill=0)
 
 
 def render(data, now, clock=True):
