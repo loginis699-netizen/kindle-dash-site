@@ -8,6 +8,7 @@ Usage:
 Requires: Pillow.  Fonts: DejaVu Sans (change FONT_* paths if needed).
 """
 import json
+import os
 import sys
 import urllib.request
 from datetime import datetime
@@ -18,8 +19,25 @@ from PIL import Image, ImageDraw, ImageFont
 W, H = 600, 800
 TZ = ZoneInfo("Europe/Vilnius")
 LAT, LON = 54.6872, 25.2797  # Vilnius
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-FONT_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_DIRS = ["/usr/share/fonts/truetype/dejavu", "/tmp/fonts"]
+FONT_URL = ("https://raw.githubusercontent.com/matplotlib/matplotlib/main/"
+            "lib/matplotlib/mpl-data/fonts/ttf/")
+
+
+def _font_path(name):
+    """System DejaVu if present, otherwise download once into /tmp (serverless)."""
+    for dd in FONT_DIRS:
+        p = os.path.join(dd, name)
+        if os.path.exists(p):
+            return p
+    os.makedirs("/tmp/fonts", exist_ok=True)
+    p = os.path.join("/tmp/fonts", name)
+    urllib.request.urlretrieve(FONT_URL + name, p)
+    return p
+
+
+FONT = _font_path("DejaVuSans.ttf")
+FONT_B = _font_path("DejaVuSans-Bold.ttf")
 
 WEEKDAYS = ["Pirmadienis", "Antradienis", "Trečiadienis", "Ketvirtadienis",
             "Penktadienis", "Šeštadienis", "Sekmadienis"]
