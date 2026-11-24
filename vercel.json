@@ -1,0 +1,4 @@
+{
+  "rewrites": [{ "source": "/dash.png", "destination": "/api/dash" }],
+  "functions": { "api/dash.py": { "includeFiles": "make_dash.py" } }
+}
